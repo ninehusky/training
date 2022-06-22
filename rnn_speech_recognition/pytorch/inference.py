@@ -37,11 +37,13 @@ from common.data.dali.data_loader import DaliDataLoader
 from common.data.features import BaseFeatures, FilterbankFeatures
 from common.data.text import Tokenizer
 from common.helpers import print_once, process_evaluation_epoch
-from common.tb_dllogger import stdout_metric_format, unique_log_fpath
+# from common.tb_dllogger import stdout_metric_format, unique_log_fpath
 from rnnt import config
 from rnnt.decoder import RNNTGreedyDecoder
 from rnnt.model import RNNT
 
+import tvm
+from tvm import relay
 
 def get_parser():
     parser = argparse.ArgumentParser(description='RNN-T')
@@ -118,22 +120,22 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
 
-    log_fpath = args.log_file or str(Path(args.output_dir, 'nvlog_infer.json'))
-    log_fpath = unique_log_fpath(log_fpath)
-    dllogger.init(backends=[JSONStreamBackend(Verbosity.DEFAULT, log_fpath),
-                            StdOutBackend(Verbosity.VERBOSE,
-                                          metric_format=stdout_metric_format)])
+    # log_fpath = args.log_file or str(Path(args.output_dir, 'nvlog_infer.json'))
+    # log_fpath = unique_log_fpath(log_fpath)
+    # dllogger.init(backends=[JSONStreamBackend(Verbosity.DEFAULT, log_fpath),
+    #                         StdOutBackend(Verbosity.VERBOSE,
+    #                                       metric_format=stdout_metric_format)])
 
-    [dllogger.log("PARAMETER", {k:v}) for k,v in vars(args).items()]
+    # [dllogger.log("PARAMETER", {k:v}) for k,v in vars(args).items()]
 
     for step in ['DNN', 'data+DNN', 'data']:
         for c in [0.99, 0.95, 0.9, 0.5]:
             cs = 'avg' if c == 0.5 else f'{int(100*c)}%'
-            dllogger.metadata(f'{step.lower()}_latency_{c}',
-                              {'name': f'{step} latency {cs}',
-                               'format': ':>7.2f', 'unit': 'ms'})
-    dllogger.metadata(
-        'eval_wer', {'name': 'WER', 'format': ':>3.3f', 'unit': '%'})
+            # dllogger.metadata(f'{step.lower()}_latency_{c}',
+            #                   {'name': f'{step} latency {cs}',
+            #                    'format': ':>7.2f', 'unit': 'ms'})
+    # dllogger.metadata(
+    #     'eval_wer', {'name': 'WER', 'format': ':>3.3f', 'unit': '%'})
 
     if args.cpu:
         device = torch.device('cpu')
@@ -171,7 +173,7 @@ def main():
         dataset_kw,
         features_kw,
         splicing_kw,
-        _, _
+        _,
     ) = config.input(cfg, 'val')
 
     tokenizer_kw = config.tokenizer(cfg)
@@ -255,7 +257,18 @@ def main():
             sz.append(feats.size(0))
 
             t1 = sync_time()
-            log_probs, log_prob_lens = model(feats, feat_lens, txt, txt_lens)
+            # log_probs, log_prob_lens = model(feats, feat_lens, txt, txt_lens)
+            model = torch.jit.trace(model, (feats, feat_lens, txt, txt_lens)).eval()
+
+            shape_list = [("feats", feats.shape), ("feat_lens", feat_lens.shape), ("txt", txt.shape), ("txt_lens", txt_lens.shape)]
+
+            mod, params = relay.frontend.from_pytorch(model, shape_list)
+
+            mod = relay.transform.InferType()(mod)
+
+            print(mod)
+            exit(1)
+
             t2 = sync_time()
 
             # burn-in period; wait for a new loader due to num_workers
