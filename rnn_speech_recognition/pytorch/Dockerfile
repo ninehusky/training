@@ -17,7 +17,8 @@ FROM ${FROM_IMAGE_NAME}
 
 ENV PYTORCH_VERSION=1.7.0a0+7036e91 
 
-RUN apt-get update && \
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys A4B469963BF863CC && \
+    apt-get update && \
     apt-get install -y libsndfile1 sox git cmake jq && \
     apt-get install -y --no-install-recommends numactl && \
     rm -rf /var/lib/apt/lists/*
